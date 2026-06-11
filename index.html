@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Verificador de Entradas</title>
+
+  <!-- Supabase v2 -->
+  <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+  <!-- QR Scanner -->
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <style>
+    /* ─── TOKENS ───────────────────────────────────────── */
+    :root {
+      --bg:          #0d0f14;
+      --surface:     #161b25;
+      --surface2:    #1e2535;
+      --border:      #2a3347;
+      --accent:      #3b82f6;
+      --accent-dim:  #1e3a5f;
+      --green:       #22c55e;
+      --green-dim:   #14532d;
+      --green-glow:  rgba(34,197,94,.25);
+      --red:         #ef4444;
+      --red-dim:     #7f1d1d;
+      --red-glow:    rgba(239,68,68,.25);
+      --yellow:      #f59e0b;
+      --text:        #e2e8f0;
+      --text-muted:  #64748b;
+      --mono:        'Courier New', Courier, monospace;
+      --sans:        -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --radius:      12px;
+      --transition:  .18s ease;
+    }
+
+    /* ─── RESET ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      -webkit-tap-highlight-color: transparent;
+      overscroll-behavior: none;
+    }
+
+    /* ─── LAYOUT ─────────────────────────────────────────── */
+    .app {
+      display: flex;
+      flex-direction: column;
+      min-height: 100dvh;
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 0 0 env(safe-area-inset-bottom);
+    }
+
+    /* ─── HEADER ─────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 16px 20px 14px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+    }
+    .header-left { display: flex; flex-direction: column; gap: 2px; }
+    .header-title {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+    .header-sub {
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: .03em;
+    }
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 5px 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--text-muted);
+      transition: background var(--transition);
+    }
+    .status-dot.online  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .status-dot.offline { background: var(--red); }
+
+    /* ─── COUNTER STRIP ──────────────────────────────────── */
+    .counter-strip {
+      display: flex;
+      background: var(--surface2);
+      border-bottom: 1px solid var(--border);
+    }
+    .counter-item {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 10px 8px;
+      gap: 2px;
+      border-right: 1px solid var(--border);
+    }
+    .counter-item:last-child { border-right: none; }
+    .counter-val {
+      font-size: 22px;
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+      line-height: 1;
+    }
+    .counter-val.green { color: var(--green); }
+    .counter-val.red   { color: var(--red); }
+    .counter-val.blue  { color: var(--accent); }
+    .counter-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-muted);
+    }
+
+    /* ─── SCANNER ────────────────────────────────────────── */
+    .scanner-section { padding: 16px 16px 8px; }
+    .scanner-wrapper {
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: #000;
+      aspect-ratio: 1 / 1;
+      max-height: 300px;
+      border: 2px solid var(--border);
+    }
+    #qr-reader {
+      width: 100% !important;
+      height: 100% !important;
+    }
+    /* Ocultar UI nativa del escáner */
+    #qr-reader__dashboard_section_swaplink,
+    #qr-reader__status_span,
+    #qr-reader__camera_selection { display: none !important; }
+    #qr-reader video { width: 100% !important; height: 100% !important; object-fit: cover; }
+    #qr-reader__scan_region { border: none !important; }
+
+    /* Marco visor animado */
+    .scan-frame {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .scan-frame::before {
+      content: '';
+      width: 55%;
+      aspect-ratio: 1;
+      border: 2.5px solid var(--accent);
+      border-radius: 8px;
+      box-shadow: 0 0 0 9999px rgba(0,0,0,.45);
+      animation: pulse-frame 2s ease-in-out infinite;
+    }
+    @keyframes pulse-frame {
+      0%,100% { border-color: var(--accent); box-shadow: 0 0 12px var(--accent), 0 0 0 9999px rgba(0,0,0,.45); }
+      50%      { border-color: #60a5fa;     box-shadow: 0 0 22px #60a5fa,    0 0 0 9999px rgba(0,0,0,.45); }
+    }
+
+    .scan-line {
+      position: absolute;
+      left: 22.5%; right: 22.5%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      animation: scan 2.4s ease-in-out infinite;
+      top: 22.5%;
+    }
+    @keyframes scan {
+      0%   { top: 22.5%; opacity: .9; }
+      50%  { top: 77.5%; opacity: .9; }
+      100% { top: 22.5%; opacity: .9; }
+    }
+
+    /* Controles del escáner */
+    .scanner-controls {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 14px 12px;
+      border-radius: var(--radius);
+      border: none;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all var(--transition);
+      letter-spacing: .03em;
+      -webkit-appearance: none;
+    }
+    .btn:active { transform: scale(.96); }
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+    }
+    .btn-primary:hover { background: #2563eb; }
+    .btn-primary:disabled { background: var(--surface2); color: var(--text-muted); cursor: not-allowed; }
+    .btn-secondary {
+      background: var(--surface2);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    /* ─── MANUAL INPUT ───────────────────────────────────── */
+    .manual-section { padding: 0 16px 12px; }
+    .manual-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .manual-input {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 13px 14px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      outline: none;
+      transition: border-color var(--transition);
+    }
+    .manual-input:focus { border-color: var(--accent); }
+    .manual-input::placeholder { color: var(--text-muted); font-size: 13px; letter-spacing: .04em; }
+    .btn-manual {
+      background: var(--surface2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 13px 16px;
+      font-size: 18px;
+      cursor: pointer;
+      transition: all var(--transition);
+      -webkit-appearance: none;
+    }
+    .btn-manual:active { transform: scale(.94); background: var(--surface); }
+
+    /* ─── RESULT CARD ────────────────────────────────────── */
+    .result-section { padding: 0 16px 16px; flex: 1; }
+    .result-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      min-height: 180px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      transition: all .25s ease;
+      text-align: center;
+    }
+    .result-card.idle {
+      border-style: dashed;
+    }
+    .result-card.loading {
+      border-color: var(--accent);
+      box-shadow: 0 0 20px rgba(59,130,246,.15);
+    }
+    .result-card.success {
+      background: rgba(34,197,94,.06);
+      border-color: var(--green);
+      box-shadow: 0 0 24px var(--green-glow);
+    }
+    .result-card.error {
+      background: rgba(239,68,68,.06);
+      border-color: var(--red);
+      box-shadow: 0 0 24px var(--red-glow);
+      animation: shake .45s ease;
+    }
+    .result-card.fraud {
+      background: rgba(239,68,68,.06);
+      border-color: var(--red);
+      box-shadow: 0 0 24px var(--red-glow);
+      animation: blink-red .6s ease 3;
+    }
+    @keyframes shake {
+      0%,100% { transform: translateX(0); }
+      20%      { transform: translateX(-8px); }
+      40%      { transform: translateX(8px); }
+      60%      { transform: translateX(-6px); }
+      80%      { transform: translateX(4px); }
+    }
+    @keyframes blink-red {
+      0%,100% { box-shadow: 0 0 24px var(--red-glow); }
+      50%     { box-shadow: 0 0 40px rgba(239,68,68,.6); }
+    }
+
+    /* Idle placeholder */
+    .idle-icon { font-size: 40px; opacity: .3; }
+    .idle-text { color: var(--text-muted); font-size: 14px; }
+
+    /* Loading state */
+    .spinner {
+      width: 36px; height: 36px;
+      border: 3px solid var(--surface2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .75s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-label {
+      color: var(--accent);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      animation: fade-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes fade-pulse {
+      0%,100% { opacity: 1; }
+      50%      { opacity: .4; }
+    }
+
+    /* Pre-data strip (número + token) */
+    .scan-meta {
+      display: flex;
+      gap: 10px;
+      width: 100%;
+    }
+    .meta-chip {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      text-align: center;
+    }
+    .meta-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: .07em;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+    .meta-value {
+      font-family: var(--mono);
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: .08em;
+      color: var(--text);
+    }
+
+    /* Result states */
+    .result-icon { font-size: 42px; line-height: 1; }
+    .result-status {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+    .result-status.green { color: var(--green); }
+    .result-status.red   { color: var(--red); }
+
+    .result-detail {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+      max-width: 280px;
+    }
+    .fraud-time {
+      font-family: var(--mono);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--red);
+      background: var(--red-dim);
+      padding: 6px 14px;
+      border-radius: 6px;
+      letter-spacing: .06em;
+    }
+
+    /* Confirm button */
+    .btn-confirm {
+      width: 100%;
+      padding: 18px;
+      background: var(--green);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 17px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: all var(--transition);
+      box-shadow: 0 4px 20px var(--green-glow);
+      animation: pulse-green 1.8s ease-in-out infinite;
+    }
+    .btn-confirm:active { transform: scale(.96); }
+    @keyframes pulse-green {
+      0%,100% { box-shadow: 0 4px 20px var(--green-glow); }
+      50%      { box-shadow: 0 4px 36px rgba(34,197,94,.45); }
+    }
+
+    /* ─── TOAST ──────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: calc(24px + env(safe-area-inset-bottom));
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 30px;
+      padding: 12px 22px;
+      font-size: 14px;
+      font-weight: 600;
+      white-space: nowrap;
+      opacity: 0;
+      transition: all .3s cubic-bezier(.34,1.56,.64,1);
+      z-index: 999;
+      pointer-events: none;
+    }
+    #toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    #toast.toast-success { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+    #toast.toast-error   { background: var(--red-dim);   border-color: var(--red);   color: var(--red); }
+
+    /* ─── FOOTER ─────────────────────────────────────────── */
+    footer {
+      padding: 10px 20px 12px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: center;
+    }
+    .footer-text {
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: .04em;
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ── HEADER ─────────────────────────────────────── -->
+  <header>
+    <div class="header-left">
+      <span class="header-title">🎟 Control de Acceso</span>
+      <span class="header-sub">Sistema de verificación de entradas</span>
+    </div>
+    <div class="status-badge">
+      <div class="status-dot" id="conn-dot"></div>
+      <span id="conn-label">Conectando…</span>
+    </div>
+  </header>
+
+  <!-- ── COUNTERS ───────────────────────────────────── -->
+  <div class="counter-strip">
+    <div class="counter-item">
+      <span class="counter-val blue" id="cnt-total">—</span>
+      <span class="counter-label">Total</span>
+    </div>
+    <div class="counter-item">
+      <span class="counter-val green" id="cnt-ingresados">—</span>
+      <span class="counter-label">Ingresados</span>
+    </div>
+    <div class="counter-item">
+      <span class="counter-val red" id="cnt-disponibles">—</span>
+      <span class="counter-label">Pendientes</span>
+    </div>
+  </div>
+
+  <!-- ── SCANNER ────────────────────────────────────── -->
+  <div class="scanner-section">
+    <div class="scanner-wrapper">
+      <div id="qr-reader"></div>
+      <div class="scan-frame"></div>
+      <div class="scan-line" id="scan-line"></div>
+    </div>
+    <div class="scanner-controls">
+      <button class="btn btn-primary" id="btn-start">▶ Iniciar Cámara</button>
+      <button class="btn btn-secondary" id="btn-stop">■ Detener</button>
+    </div>
+  </div>
+
+  <!-- ── MANUAL INPUT ───────────────────────────────── -->
+  <div class="manual-section">
+    <div class="manual-row">
+      <input
+        class="manual-input"
+        id="manual-input"
+        type="text"
+        maxlength="12"
+        placeholder="ID-TOKEN  (ej: 45-JKM4RX)"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+      />
+      <button class="btn-manual" id="btn-manual" title="Verificar manualmente">⏎</button>
+    </div>
+  </div>
+
+  <!-- ── RESULT CARD ────────────────────────────────── -->
+  <div class="result-section">
+    <div class="result-card idle" id="result-card">
+      <span class="idle-icon">📷</span>
+      <span class="idle-text">Escanea un código QR o ingresa el código manualmente</span>
+    </div>
+  </div>
+
+  <!-- ── FOOTER ─────────────────────────────────────── -->
+  <footer>
+    <span class="footer-text">Powered by Supabase &amp; html5-qrcode</span>
+  </footer>
+
+</div>
+
+<!-- ── TOAST ──────────────────────────────────────────── -->
+<div id="toast"></div>
+
+<!-- ═══════════════════════════════════════════════════════
+     SCRIPT PRINCIPAL
+════════════════════════════════════════════════════════ -->
+<script>
+"use strict";
+
+/* ── 0. CREDENCIALES ──────────────────────────────────── */
+const SUPABASE_URL      = "TU_URL_DE_SUPABASE";
+const SUPABASE_ANON_KEY = "TU_ANON_KEY_DE_SUPABASE";
+
+/* ── 1. CLIENTE SUPABASE ──────────────────────────────── */
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+/* ── 2. ESTADO GLOBAL ─────────────────────────────────── */
+let scanner       = null;
+let scannerActive = false;
+let procesando    = false;   // lock anti-doble-scan
+let pendingTicket = null;    // ticket listo para confirmar
+
+/* ── 3. REFS DOM ──────────────────────────────────────── */
+const card        = document.getElementById("result-card");
+const btnStart    = document.getElementById("btn-start");
+const btnStop     = document.getElementById("btn-stop");
+const btnManual   = document.getElementById("btn-manual");
+const manualInput = document.getElementById("manual-input");
+const connDot     = document.getElementById("conn-dot");
+const connLabel   = document.getElementById("conn-label");
+const cntTotal    = document.getElementById("cnt-total");
+const cntIng      = document.getElementById("cnt-ingresados");
+const cntDisp     = document.getElementById("cnt-disponibles");
+const toastEl     = document.getElementById("toast");
+const scanLine    = document.getElementById("scan-line");
+
+/* ── 4. UTILIDADES ────────────────────────────────────── */
+
+function formatHora(iso) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleTimeString("es-PE", {
+    hour: "2-digit", minute: "2-digit", second: "2-digit",
+    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone
+  });
+}
+
+let toastTimer;
+function showToast(msg, type = "success") {
+  toastEl.textContent = msg;
+  toastEl.className   = `show toast-${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastEl.className = ""; }, 3000);
+}
+
+function vibrate(pattern = [60]) {
+  if (navigator.vibrate) navigator.vibrate(pattern);
+}
+
+/* ── 5. CONTADORES ────────────────────────────────────── */
+async function refreshCounters() {
+  try {
+    const { count: total } = await db
+      .from("tickets").select("*", { count: "exact", head: true });
+
+    const { count: ingresados } = await db
+      .from("tickets")
+      .select("*", { count: "exact", head: true })
+      .eq("estado", "Registrado");
+
+    cntTotal.textContent    = total       ?? "—";
+    cntIng.textContent      = ingresados  ?? "—";
+    cntDisp.textContent     = total != null && ingresados != null
+                              ? total - ingresados : "—";
+  } catch { /* silencioso */ }
+}
+
+/* ── 6. ESTADO DE CONEXIÓN ────────────────────────────── */
+async function checkConnection() {
+  try {
+    const { error } = await db
+      .from("tickets")
+      .select("id", { head: true })
+      .limit(1);
+
+    if (error) throw error;
+
+    connDot.className   = "status-dot online";
+    connLabel.textContent = "En línea";
+    await refreshCounters();
+  } catch {
+    connDot.className   = "status-dot offline";
+    connLabel.textContent = "Sin conexión";
+  }
+}
+
+/* ── 7. RENDERIZADORES DE CARD ────────────────────────── */
+
+function renderIdle() {
+  card.className = "result-card idle";
+  card.innerHTML = `
+    <span class="idle-icon">📷</span>
+    <span class="idle-text">Escanea un código QR o ingresa el código manualmente</span>
+  `;
+  pendingTicket = null;
+}
+
+function renderLoading(id, token) {
+  card.className = "result-card loading";
+  card.innerHTML = `
+    <div class="scan-meta">
+      <div class="meta-chip">
+        <div class="meta-label">Número de entrada</div>
+        <div class="meta-value">${id}</div>
+      </div>
+      <div class="meta-chip">
+        <div class="meta-label">TOKEN</div>
+        <div class="meta-value">${token}</div>
+      </div>
+    </div>
+    <div class="spinner"></div>
+    <div class="loading-label">Consultando disponibilidad…</div>
+  `;
+}
+
+function renderSuccess(ticket) {
+  card.className = "result-card success";
+  card.innerHTML = `
+    <div class="scan-meta">
+      <div class="meta-chip">
+        <div class="meta-label">Número de entrada</div>
+        <div class="meta-value">${ticket.id}</div>
+      </div>
+      <div class="meta-chip">
+        <div class="meta-label">TOKEN</div>
+        <div class="meta-value">${ticket.token}</div>
+      </div>
+    </div>
+    <div class="result-icon">✅</div>
+    <div class="result-status green">🟢 ESTADO: DISPONIBLE</div>
+    <button class="btn-confirm" id="btn-confirm">✔ CONFIRMAR INGRESO</button>
+  `;
+  document.getElementById("btn-confirm")
+    .addEventListener("click", () => confirmarIngreso(ticket));
+}
+
+function renderFraud(ticket) {
+  const hora = formatHora(ticket.hora_ingreso);
+  card.className = "result-card fraud";
+  card.innerHTML = `
+    <div class="scan-meta">
+      <div class="meta-chip">
+        <div class="meta-label">Número de entrada</div>
+        <div class="meta-value">${ticket.id}</div>
+      </div>
+      <div class="meta-chip">
+        <div class="meta-label">TOKEN</div>
+        <div class="meta-value">${ticket.token}</div>
+      </div>
+    </div>
+    <div class="result-icon">🚫</div>
+    <div class="result-status red">⚠️ ALERTA DE FRAUDE</div>
+    <div class="result-detail">Esta entrada ya ingresó previamente a las:</div>
+    <div class="fraud-time">${hora}</div>
+    <button class="btn btn-secondary" id="btn-nuevo" style="width:100%;margin-top:4px">
+      ↩ Nuevo escaneo
+    </button>
+  `;
+  document.getElementById("btn-nuevo")
+    .addEventListener("click", resetAndResume);
+  vibrate([100, 60, 100, 60, 200]);
+}
+
+function renderNotFound(token) {
+  card.className = "result-card error";
+  card.innerHTML = `
+    <div class="result-icon">❌</div>
+    <div class="result-status red">ERROR: Código inválido</div>
+    <div class="result-detail">
+      El TOKEN <strong style="font-family:var(--mono);color:var(--text)">${token}</strong>
+      no existe en la base de datos.<br>Código falso o inexistente.
+    </div>
+    <button class="btn btn-secondary" id="btn-nuevo2" style="width:100%;margin-top:4px">
+      ↩ Nuevo escaneo
+    </button>
+  `;
+  document.getElementById("btn-nuevo2")
+    .addEventListener("click", resetAndResume);
+  vibrate([200, 80, 200]);
+}
+
+/* ── 8. LÓGICA PRINCIPAL ──────────────────────────────── */
+
+async function verificarCodigo(raw) {
+  if (procesando) return;
+  procesando = true;
+
+  // Pausar escáner durante verificación
+  if (scannerActive && scanner) {
+    try { await scanner.pause(true); } catch { /* ok */ }
+  }
+
+  // Limpia y parsea
+  const str  = raw.trim().toUpperCase();
+  const partes = str.split("-");
+
+  if (partes.length < 2) {
+    renderNotFound(str);
+    procesando = false;
+    return;
+  }
+
+  const [idEscaneado, ...restToken] = partes;
+  const tokenEscaneado = restToken.join("-"); // por si el token tuviera guión
+
+  // Feedback previo al fetch
+  renderLoading(idEscaneado, tokenEscaneado);
+
+  try {
+    const { data: ticket, error } = await db
+      .from("tickets")
+      .select("id, token, estado, hora_ingreso")
+      .eq("token", tokenEscaneado)
+      .single();
+
+    if (error || !ticket) {
+      renderNotFound(tokenEscaneado);
+      procesando = false;
+      return;
+    }
+
+    if (ticket.estado === "Registrado") {
+      renderFraud(ticket);
+      procesando = false;
+      return;
+    }
+
+    // Disponible
+    pendingTicket = ticket;
+    renderSuccess(ticket);
+    vibrate([40]);
+    procesando = false;
+
+  } catch (err) {
+    card.className = "result-card error";
+    card.innerHTML = `
+      <div class="result-icon">⚠️</div>
+      <div class="result-status red">Error de conexión</div>
+      <div class="result-detail">${err.message || "Sin respuesta del servidor"}</div>
+    `;
+    procesando = false;
+  }
+}
+
+/* ── 9. CONFIRMAR INGRESO ─────────────────────────────── */
+
+async function confirmarIngreso(ticket) {
+  const btnC = document.getElementById("btn-confirm");
+  if (btnC) {
+    btnC.disabled    = true;
+    btnC.textContent = "Registrando…";
+  }
+
+  try {
+    const { error } = await db
+      .from("tickets")
+      .update({
+        estado:      "Registrado",
+        hora_ingreso: new Date().toISOString()
+      })
+      .eq("token", ticket.token);
+
+    if (error) throw error;
+
+    vibrate([50, 30, 80]);
+    showToast(`✅ Entrada #${ticket.id} registrada correctamente`, "success");
+    await refreshCounters();
+    resetAndResume();
+
+  } catch (err) {
+    showToast(`❌ Error al registrar: ${err.message}`, "error");
+    if (btnC) {
+      btnC.disabled    = false;
+      btnC.textContent = "✔ CONFIRMAR INGRESO";
+    }
+  }
+}
+
+/* ── 10. RESET Y REACTIVAR ────────────────────────────── */
+
+function resetAndResume() {
+  renderIdle();
+  pendingTicket = null;
+  procesando    = false;
+  manualInput.value = "";
+
+  if (scannerActive && scanner) {
+    try { scanner.resume(); } catch { /* ok */ }
+  }
+}
+
+/* ── 11. ESCÁNER QR ───────────────────────────────────── */
+
+async function startScanner() {
+  try {
+    scanner = new Html5Qrcode("qr-reader", { verbose: false });
+
+    const config = {
+      fps: 12,
+      qrbox: { width: 220, height: 220 },
+      aspectRatio: 1.0,
+      disableFlip: false
+    };
+
+    await scanner.start(
+      { facingMode: "environment" },
+      config,
+      (decodedText) => {
+        if (!procesando) verificarCodigo(decodedText);
+      },
+      () => { /* error silencioso por frame */ }
+    );
+
+    scannerActive = true;
+    btnStart.disabled    = true;
+    btnStart.textContent = "✔ Cámara activa";
+    scanLine.style.display = "block";
+
+  } catch (err) {
+    showToast("No se pudo acceder a la cámara. Revisa los permisos.", "error");
+    console.error("Scanner error:", err);
+  }
+}
+
+async function stopScanner() {
+  if (scanner && scannerActive) {
+    try {
+      await scanner.stop();
+      scanner.clear();
+    } catch { /* ok */ }
+    scannerActive        = false;
+    btnStart.disabled    = false;
+    btnStart.textContent = "▶ Iniciar Cámara";
+    scanLine.style.display = "none";
+  }
+}
+
+/* ── 12. ENTRADA MANUAL ───────────────────────────────── */
+
+function handleManual() {
+  const val = manualInput.value.trim();
+  if (!val) return;
+  verificarCodigo(val);
+}
+
+btnManual.addEventListener("click", handleManual);
+manualInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") handleManual();
+});
+
+/* ── 13. EVENTOS DE BOTONES ───────────────────────────── */
+
+btnStart.addEventListener("click", startScanner);
+btnStop.addEventListener("click", async () => {
+  await stopScanner();
+  renderIdle();
+});
+
+/* ── 14. INIT ─────────────────────────────────────────── */
+
+(async function init() {
+  await checkConnection();
+  // Refresh de contadores cada 30s
+  setInterval(checkConnection, 30_000);
+})();
+</script>
+</body>
+</html>
