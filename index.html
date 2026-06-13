@@ -675,9 +675,14 @@ function renderSuccess(ticket) {
     <div class="result-icon">✅</div>
     <div class="result-status green">🟢 ESTADO: DISPONIBLE</div>
     <button class="btn-confirm" id="btn-confirm">✔ CONFIRMAR INGRESO</button>
+    <button class="btn btn-secondary" id="btn-cancelar" style="width:100%;margin-top:2px">
+      ✕ Cancelar — escanear otro
+    </button>
   `;
   document.getElementById("btn-confirm")
     .addEventListener("click", () => confirmarIngreso(ticket));
+  document.getElementById("btn-cancelar")
+    .addEventListener("click", resetAndResume);
 }
 
 function renderFraud(ticket) {
@@ -707,14 +712,30 @@ function renderFraud(ticket) {
   vibrate([100, 60, 100, 60, 200]);
 }
 
-function renderNotFound(token) {
+function renderNotFound(token, rawContent) {
   card.className = "result-card error";
   card.innerHTML = `
     <div class="result-icon">❌</div>
-    <div class="result-status red">ERROR: Código inválido</div>
+    <div class="result-status red">QR NO PERTENECE AL EVENTO</div>
     <div class="result-detail">
-      El TOKEN <strong style="font-family:var(--mono);color:var(--text)">${token}</strong>
-      no existe en la base de datos.<br>Código falso o inexistente.
+      Este código QR no está registrado en la base de datos de entradas.
+    </div>
+    <div style="
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      width: 100%;
+      margin-top: 4px;
+    ">
+      <div class="meta-label" style="text-align:left;margin-bottom:6px">📄 Contenido leído del QR:</div>
+      <div style="
+        font-family: var(--mono);
+        font-size: 13px;
+        color: var(--yellow);
+        word-break: break-all;
+        line-height: 1.5;
+      ">${rawContent || token}</div>
     </div>
     <button class="btn btn-secondary" id="btn-nuevo2" style="width:100%;margin-top:4px">
       ↩ Nuevo escaneo
@@ -741,7 +762,7 @@ async function verificarCodigo(raw) {
   const partes = str.split("-");
 
   if (partes.length < 2) {
-    renderNotFound(str);
+    renderNotFound(str, str);
     procesando = false;
     return;
   }
@@ -760,7 +781,7 @@ async function verificarCodigo(raw) {
       .single();
 
     if (error || !ticket) {
-      renderNotFound(tokenEscaneado);
+      renderNotFound(tokenEscaneado, raw.trim());
       procesando = false;
       return;
     }
